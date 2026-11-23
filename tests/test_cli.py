@@ -117,3 +117,11 @@ def test_validate_and_init(tmp_path: Path) -> None:
     broken.write_text("name: x\nproviders: []\ncases: []\n")
     result = invoke("validate", str(broken))
     assert result.exit_code == 2 and "invalid suite" in result.output
+
+
+def test_concurrency_override(tmp_path: Path) -> None:
+    suite = write_suite(tmp_path, mock_suite(GOOD, CASES))
+    ok = invoke("run", str(suite), "--concurrency", "1", "--out", str(tmp_path / "r.json"))
+    assert ok.exit_code == 0
+    bad = invoke("run", str(suite), "--concurrency", "0", "--out", str(tmp_path / "r.json"))
+    assert bad.exit_code == 2
