@@ -1,0 +1,221 @@
+# Case study: the phone intake agent from github.com/Muddasirr/voice-patient-intake.
+# prompt.md and tools.json are the agent's real system prompt and tool schemas.
+# Each case checks one rule from the prompt, mostly through the tools the model
+# chooses to call, because a wrong tool call writes wrong data.
+#
+#   export GROQ_API_KEY=...            # judge + default model
+#   export OPENAI_API_KEY=...          # optional second model
+#   driftgate run examples/voice-intake/suite.yaml --provider llama-3.3-70b
+name: voice-intake
+description: Tool-calling and conversation rules for a patient-intake phone agent.
+system: file://prompt.md
+tools: file://tools.json
+
+providers:
+  - id: llama-3.3-70b
+    type: openai
+    base_url: https://api.groq.com/openai/v1
+    model: llama-3.3-70b-versatile
+    api_key_env: GROQ_API_KEY
+    # Check your provider's current prices; these drive the cost columns.
+    pricing: {input_per_mtok: 0.59, output_per_mtok: 0.79}
+  - id: gpt-4o-mini
+    type: openai
+    model: gpt-4o-mini
+    api_key_env: OPENAI_API_KEY
+    pricing: {input_per_mtok: 0.15, output_per_mtok: 0.60}
+
+judge: llama-3.3-70b
+
+defaults:
+  temperature: 0
+  max_tokens: 400
+  concurrency: 4
+
+thresholds:
+  min_pass_rate: 0.9
+  max_regressions: 0
+  max_cost_increase_pct: 25
+
+cases:
+  # ---- tool-calling rules -------------------------------------------------
+  - id: looks-up-caller-once-phone-is-known
+    description: Prompt rule 2, call lookup_patient_by_phone as soon as a phone number is given.
+    tags: [tools, smoke]
+    messages:
+      - {role: assistant, content: "Thanks for calling! Can I get your first and last name, and the best phone number to reach you?"}
+      - {role: user, content: "Sure, I'm Maria Lopez and my number is (512) 555-0199."}
+    assert:
+      - {type: tool_call, name: lookup_patient_by_phone, position: first, args: {phone_number: {regex: "5\\D*1\\D*2\\D*5\\D*5\\D*5\\D*0\\D*1\\D*9\\D*9"}}}
+      - {type: no_tool_call, name: create_patient}
+
+  - id: saves-only-after-confirmation
+    description: Prompt rules 5-6, create_patient fires after an explicit yes, with normalised values.
+    tags: [tools, smoke]
+    messages:
+      - {role: user, content: "Hi, I'm Maria Lopez, number 512 555 0199."}
+      - role: assistant
+        tool_calls: [{id: call_lookup, name: lookup_patient_by_phone, arguments: {phone_number: "5125550199"}}]
+      - {role: tool, tool_call_id: call_lookup, content: '{"success": true, "found": false}'}
+      - {role: assistant, content: "Thanks Maria. What's your date of birth?"}
+      - {role: user, content: "March fourteenth, nineteen ninety."}
+      - {role: assistant, content: "Got it. And how would you like your sex recorded: male, female, other, or decline to answer?"}
+      - {role: user, content: "Female."}
+      - {role: assistant, content: "Perfect. What's your street address, city, state and ZIP?"}
+      - {role: user, content: "200 Congress Avenue, Austin, Texas, 78701."}
+      - {role: assistant, content: "I can also collect insurance, an emergency contact and your preferred language if you'd like. Want to add any of that, or should we finish up?"}
+      - {role: user, content: "Let's just finish up."}
+      - {role: assistant, content: "Here's what I have: Maria Lopez, born March 14, 1990, female, phone 512-555-0199, 200 Congress Avenue, Austin, TX 78701. Did I get all of that right?"}
+      - {role: user, content: "Yes, that's all correct."}
+    assert:
+      - type: tool_call
+        name: create_patient
+        args:
+          first_name: Maria
+          last_name: Lopez
+          date_of_birth: "1990-03-14"
+          sex: Female
+          phone_number: {regex: "5\\D*1\\D*2\\D*5\\D*5\\D*5\\D*0\\D*1\\D*9\\D*9"}
+          city: Austin
+          state: TX
+          zip_code: "78701"
+
+  - id: offers-update-to-returning-caller
+    description: Prompt rule 2, a found record means offering an update, not creating a duplicate.
+    tags: [tools, smoke]
+    messages:
+      - {role: user, content: "Hi, this is Jane Doe, my number is 555 123 4567."}
+      - role: assistant
+        tool_calls: [{id: call_lookup, name: lookup_patient_by_phone, arguments: {phone_number: "5551234567"}}]
+      - role: tool
+        tool_call_id: call_lookup
+        content: '{"success": true, "found": true, "patient_id": "3f2b8c1e-9a4d-4e7b-8c21-5d6f0a1b2c3d", "first_name": "Jane", "last_name": "Doe"}'
+    assert:
+      - {type: no_tool_call, name: create_patient}
+      - type: llm_judge
+        rubric: >-
+          Tells the caller there's already a record for Jane Doe and asks whether they'd like
+          to update their information instead, without starting a new registration.
+
+  - id: no-save-before-read-back
+    description: Prompt rule 5, never save before reading back and getting a yes.
+    tags: [tools]
+    messages:
+      - {role: user, content: "I'm Maria Lopez, 512 555 0199, born 3/14/1990, female."}
+      - {role: assistant, content: "Thanks Maria! What's your street address, city, state and ZIP?"}
+      - {role: user, content: "200 Congress Avenue, Austin TX 78701."}
+    assert:
+      - {type: no_tool_call, name: create_patient}
+      - type: llm_judge
+        rubric: >-
+          The assistant either offers the optional extras (insurance, emergency contact,
+          preferred language) or reads back the collected details and asks the caller to
+          confirm. It must NOT say the registration is complete or saved.
+
+  - id: no-save-with-missing-zip
+    description: Never fabricate a value; ZIP is required.
+    tags: [tools]
+    messages:
+      - {role: user, content: "Maria Lopez, 512 555 0199, born March 14 1990, female, 200 Congress Avenue in Austin, Texas."}
+      - {role: assistant, content: "Thanks Maria. What's your ZIP code?"}
+      - {role: user, content: "I don't remember it right now, just go ahead and save it."}
+    assert:
+      - {type: no_tool_call, name: create_patient}
+      - type: llm_judge
+        rubric: >-
+          Explains that the ZIP code is needed to finish registration and asks for it (or
+          offers a way to find it), without inventing a ZIP code.
+
+  - id: rejects-short-phone-number
+    description: Phone numbers must have 10 digits; re-ask instead of looking up.
+    tags: [tools, validation]
+    messages:
+      - {role: assistant, content: "Can I get your name and phone number?"}
+      - {role: user, content: "Maria Lopez, and it's 555-0199."}
+    assert:
+      - {type: no_tool_call, name: lookup_patient_by_phone}
+      - type: llm_judge
+        rubric: Asks the caller for their full 10-digit phone number (including area code).
+
+  # ---- validation and conversation rules ---------------------------------
+  - id: rejects-future-date-of-birth
+    tags: [validation]
+    messages:
+      - {role: user, content: "I'm Maria Lopez, 512 555 0199."}
+      - {role: assistant, content: "Thanks Maria. What's your date of birth?"}
+      - {role: user, content: "June 2nd, 2031."}
+    assert:
+      - {type: no_tool_call, name: create_patient}
+      - type: llm_judge
+        rubric: >-
+          Says plainly that the date doesn't look right (it's in the future) and asks again
+          for just the date of birth, without moving on to other fields.
+
+  - id: accepts-spelling-correction
+    description: Corrections are applied without restarting.
+    tags: [conversation]
+    messages:
+      - {role: user, content: "Maria Lopez, 512 555 0199, born 3/14/1990, female, 200 Congress Ave, Austin TX 78701. No extras."}
+      - {role: assistant, content: "Here's what I have: Maria Lopez, born March 14, 1990, female, phone 512-555-0199, 200 Congress Avenue, Austin, TX 78701. Did I get all of that right?"}
+      - {role: user, content: "Almost, my last name is spelled L-O-P-E-S, with an S."}
+    assert:
+      - {type: no_tool_call, name: create_patient}
+      - type: llm_judge
+        rubric: >-
+          Acknowledges the corrected spelling "Lopes" and asks the caller to confirm it (or
+          re-confirms the record), without restarting the registration or asking for fields
+          already given.
+
+  - id: offers-optional-fields-once
+    description: Prompt rule 4, one inviting question for optional fields.
+    tags: [conversation]
+    messages:
+      - {role: user, content: "Maria Lopez, 512 555 0199, born 3/14/1990, female."}
+      - {role: assistant, content: "Thanks Maria! What's your street address, city, state and ZIP?"}
+      - {role: user, content: "200 Congress Avenue, Austin, TX 78701."}
+    assert:
+      - {type: no_tool_call, name: create_patient}
+      - type: llm_judge
+        min_score: 3
+        rubric: >-
+          Offers the optional information (insurance, emergency contact, preferred language)
+          in a single question the caller can decline, OR moves straight to reading back the
+          details for confirmation. Does not interrogate the caller field by field.
+
+  - id: switches-to-spanish
+    description: Switch language immediately when the caller asks.
+    tags: [conversation, smoke]
+    input: "Hola, ¿habla español? Quiero registrarme como paciente nuevo."
+    assert:
+      - {type: no_tool_call}
+      - type: llm_judge
+        rubric: >-
+          The reply is entirely in Spanish and continues the registration (for example, asks
+          for the caller's name), without asking permission to switch languages.
+
+  - id: asks-one-or-two-things-at-a-time
+    tags: [conversation]
+    input: "Hi, I'd like to register as a new patient."
+    assert:
+      - {type: no_tool_call}
+      - {type: max_latency_ms, value: 5000}
+      - type: llm_judge
+        rubric: >-
+          Asks for at most two pieces of information (for example name and phone number).
+          Does not list all the required fields at once. Sounds like a person on the phone,
+          not a form.
+
+  - id: keeps-turns-short
+    description: It's a phone call; long answers are bad UX and cost more.
+    tags: [conversation, cost]
+    messages:
+      - {role: user, content: "Hi, I'm Maria Lopez, my number is 512 555 0199."}
+      - {role: assistant, content: "Thanks Maria! What's your date of birth?"}
+      - {role: user, content: "Why do you need all this?"}
+    assert:
+      - {type: no_tool_call, name: create_patient}
+      - {type: max_cost_usd, value: 0.01}
+      - type: llm_judge
+        rubric: >-
+          Briefly explains why the information is needed (to register them as a patient) in
+          one or two short sentences, then gently returns to asking for the date of birth.

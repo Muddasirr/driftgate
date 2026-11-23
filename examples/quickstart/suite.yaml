@@ -1,0 +1,65 @@
+# Runs offline: the `mock` provider returns canned answers, so you can try the
+# workflow (run, baseline, compare, PR comment) without an API key.
+# Swap the provider for a real one (see examples/voice-intake) to test a model.
+#
+#   driftgate run examples/quickstart/suite.yaml
+name: quickstart
+system: You are a concise support assistant for Acme. Never promise refunds.
+
+providers:
+  - id: mock-support-bot
+    type: mock
+    latency_ms: 5
+    pricing: {input_per_mtok: 0.15, output_per_mtok: 0.60}
+    responses:
+      refund-request:
+        content: "Sorry your order arrived damaged. I've opened a ticket and our team will email you about a replacement or other options within 24 hours."
+        input_tokens: 64
+        output_tokens: 31
+      order-status-tool:
+        tool_calls: [{name: get_order_status, arguments: {order_id: "A-1042"}}]
+        input_tokens: 80
+        output_tokens: 18
+      structured-summary:
+        content: '{"intent": "cancel_subscription", "sentiment": "negative", "needs_human": true}'
+        input_tokens: 70
+        output_tokens: 22
+
+tools:
+  - type: function
+    function:
+      name: get_order_status
+      description: Look up the shipping status of an order.
+      parameters:
+        type: object
+        properties: {order_id: {type: string}}
+        required: [order_id]
+
+thresholds:
+  min_pass_rate: 1.0
+  max_regressions: 0
+
+cases:
+  - id: refund-request
+    input: My order arrived broken, I want my money back now.
+    assert:
+      - {type: not_contains, value: "I will refund"}
+      - {type: regex, pattern: "(?i)sorry|apolog"}
+      - {type: max_cost_usd, value: 0.001}
+
+  - id: order-status-tool
+    input: Where is order A-1042?
+    assert:
+      - {type: tool_call, name: get_order_status, args: {order_id: {regex: "^A-\\d+$"}}}
+
+  - id: structured-summary
+    input: "Summarise as JSON: 'Cancel my plan, this is the third outage this month.'"
+    assert:
+      - type: json_schema
+        schema:
+          type: object
+          required: [intent, sentiment, needs_human]
+          properties:
+            intent: {type: string}
+            sentiment: {enum: [positive, neutral, negative]}
+            needs_human: {type: boolean}
