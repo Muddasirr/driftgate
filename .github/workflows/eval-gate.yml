@@ -1,0 +1,25 @@
+# Runs this repo's own GitHub Action on the offline quickstart suite, so every
+# change to action.yml is exercised end to end (baseline fetch, run, artifact,
+# PR comment). Real projects point `suite` at their own suite file and pass
+# provider API keys through `env`.
+name: Eval gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  driftgate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          suite: examples/quickstart/suite.yaml
+          artifact-name: driftgate-quickstart
