@@ -92,7 +92,10 @@ def _escape(text: str, limit: int = 200) -> str:
 
 
 def _money(value: float | None) -> str:
-    return "n/a" if value is None else f"${value:.4f}"
+    if value is None:
+        return "n/a"
+    # Per-run costs are often fractions of a cent; keep enough digits to compare.
+    return f"${value:.4f}" if value >= 0.01 else f"${value:.6f}"
 
 
 def _ms(value: float | None) -> str:

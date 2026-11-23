@@ -110,3 +110,11 @@ def test_rejects_unknown_schema_version(tmp_path: Path) -> None:
     path.write_text(run_result().model_copy(update={"schema_version": 99}).model_dump_json())
     with pytest.raises(ValueError, match="schema v99"):
         RunResult.load(path)
+
+
+def test_money_keeps_sub_cent_precision() -> None:
+    from driftgate.report import _money
+
+    assert _money(None) == "n/a"
+    assert _money(0.000123) == "$0.000123"
+    assert _money(1.5) == "$1.5000"
