@@ -175,9 +175,53 @@ Assertion = Annotated[
 # ------------------------------------------------------------------- suite + cases
 
 
+class HistoryToolCall(_Model):
+    """A tool call the assistant made earlier in the conversation."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class Message(_Model):
-    role: Literal["system", "user", "assistant"]
-    content: str
+    """One conversation turn. Assistant turns may carry `tool_calls`; `tool` turns
+    carry the result for a `tool_call_id`, so agent histories can be replayed."""
+
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str | None = None
+    tool_calls: list[HistoryToolCall] = Field(default_factory=list)
+    tool_call_id: str | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> Message:
+        if self.role == "tool":
+            if not self.tool_call_id or self.content is None:
+                raise ValueError("tool messages need 'tool_call_id' and 'content'")
+        elif self.tool_call_id is not None:
+            raise ValueError("'tool_call_id' is only allowed on tool messages")
+        if self.tool_calls and self.role != "assistant":
+            raise ValueError("'tool_calls' is only allowed on assistant messages")
+        if self.role in ("system", "user") and self.content is None:
+            raise ValueError(f"{self.role} messages need 'content'")
+        if self.role == "assistant" and self.content is None and not self.tool_calls:
+            raise ValueError("assistant messages need 'content' or 'tool_calls'")
+        return self
+
+    def to_wire(self) -> dict[str, Any]:
+        """OpenAI chat-completions format."""
+        if self.role == "tool":
+            return {"role": "tool", "tool_call_id": self.tool_call_id, "content": self.content}
+        message: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.tool_calls:
+            message["tool_calls"] = [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
+                }
+                for call in self.tool_calls
+            ]
+        return message
 
 
 class Case(_Model):

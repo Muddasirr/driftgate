@@ -115,3 +115,61 @@ def test_select_cases(tmp_path: Path) -> None:
     assert [c.id for c in select_cases(suite, ids=["b"])] == ["b"]
     with pytest.raises(ValueError, match="unknown case id"):
         select_cases(suite, ids=["zzz"])
+
+
+def test_tool_call_history_uses_openai_wire_format(tmp_path: Path) -> None:
+    case = {
+        "id": "returning",
+        "messages": [
+            {"role": "user", "content": "I'm Maria, 512 555 0199"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_1", "name": "lookup", "arguments": {"phone": "5125550199"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"found": true}'},
+        ],
+        "assert": [{"type": "json_valid"}],
+    }
+    suite = load_suite(write_suite(tmp_path, mock_suite({}, [case])))
+    wire = build_messages(suite, suite.cases[0])
+    assert wire[1] == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": '{"phone": "5125550199"}'},
+            }
+        ],
+    }
+    assert wire[2] == {"role": "tool", "tool_call_id": "call_1", "content": '{"found": true}'}
+
+    from driftgate.runner import _conversation_text
+
+    transcript = _conversation_text(wire)
+    assert 'ASSISTANT CALLED lookup({"phone": "5125550199"})' in transcript
+    assert 'TOOL RESULT: {"found": true}' in transcript
+
+
+@pytest.mark.parametrize(
+    ("message", "error"),
+    [
+        ({"role": "tool", "content": "x"}, "tool_call_id"),
+        ({"role": "user", "tool_call_id": "c", "content": "x"}, "only allowed on tool"),
+        (
+            {"role": "user", "content": "x", "tool_calls": [{"id": "c", "name": "f"}]},
+            "only allowed on assistant",
+        ),
+        ({"role": "assistant"}, "'content' or 'tool_calls'"),
+        ({"role": "user"}, "need 'content'"),
+    ],
+)
+def test_rejects_malformed_history(tmp_path: Path, message: dict[str, object], error: str) -> None:
+    from driftgate.config import ConfigError
+
+    case = {"id": "a", "messages": [message], "assert": [{"type": "json_valid"}]}
+    with pytest.raises(ConfigError, match=error):
+        load_suite(write_suite(tmp_path, mock_suite({}, [case])))

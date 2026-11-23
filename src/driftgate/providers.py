@@ -32,7 +32,7 @@ class ProviderError(Exception):
 @dataclass(frozen=True)
 class Request:
     case_id: str
-    messages: list[dict[str, str]]
+    messages: list[dict[str, Any]]
     tools: list[dict[str, Any]] | None = None
     temperature: float = 0.0
     max_tokens: int = 512

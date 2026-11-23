@@ -8,6 +8,7 @@ import os
 import subprocess
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from driftgate import __version__
 from driftgate.assertions import JudgeContext, evaluate
@@ -19,9 +20,9 @@ from driftgate.results import Attempt, CaseResult, RunResult
 ProgressCallback = Callable[[CaseResult], None]
 
 
-def build_messages(suite: Suite, case: Case) -> list[dict[str, str]]:
+def build_messages(suite: Suite, case: Case) -> list[dict[str, Any]]:
     if case.messages is not None:
-        messages = [m.model_dump() for m in case.messages]
+        messages = [m.to_wire() for m in case.messages]
         if suite.system and not any(m["role"] == "system" for m in messages):
             messages.insert(0, {"role": "system", "content": suite.system})
         return messages
@@ -31,11 +32,23 @@ def build_messages(suite: Suite, case: Case) -> list[dict[str, str]]:
     return messages
 
 
-def _conversation_text(messages: list[dict[str, str]]) -> str:
-    # The system prompt is left out: the judge grades behaviour, not the prompt.
-    return "\n".join(
-        f"{m['role'].upper()}: {m['content']}" for m in messages if m["role"] != "system"
-    )
+def _conversation_text(messages: list[dict[str, Any]]) -> str:
+    """Plain-text transcript for the judge. The system prompt is left out: the
+    judge grades behaviour, not the prompt."""
+    lines = []
+    for m in messages:
+        role = m["role"]
+        if role == "system":
+            continue
+        if role == "tool":
+            lines.append(f"TOOL RESULT: {m['content']}")
+            continue
+        if m.get("content"):
+            lines.append(f"{role.upper()}: {m['content']}")
+        for call in m.get("tool_calls", []):
+            fn = call["function"]
+            lines.append(f"{role.upper()} CALLED {fn['name']}({fn['arguments']})")
+    return "\n".join(lines)
 
 
 def select_cases(suite: Suite, tags: Iterable[str] = (), ids: Iterable[str] = ()) -> list[Case]:
