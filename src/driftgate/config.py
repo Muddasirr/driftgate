@@ -62,6 +62,26 @@ class OpenAIProviderSpec(_Model):
     max_retries: int = Field(default=4, ge=0, le=10)
 
 
+class AnthropicProviderSpec(_Model):
+    """Claude models through the official Anthropic SDK (`pip install driftgate[anthropic]`).
+
+    `max_tokens` overrides the suite default for this provider: current Claude models
+    think before answering and thinking counts toward `max_tokens`, so they need more
+    room than a non-reasoning model. `effort` trades depth for speed and cost.
+    """
+
+    type: Literal["anthropic"]
+    id: str
+    model: str
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    base_url: str | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+    pricing: Pricing | None = None
+    timeout_s: float = Field(default=600.0, gt=0)
+    max_retries: int = Field(default=2, ge=0, le=10)
+
+
 class MockProviderSpec(_Model):
     """Canned responses keyed by case id. For tests, demos and offline CI."""
 
@@ -73,7 +93,9 @@ class MockProviderSpec(_Model):
     pricing: Pricing | None = None
 
 
-ProviderSpec = Annotated[OpenAIProviderSpec | MockProviderSpec, Field(discriminator="type")]
+ProviderSpec = Annotated[
+    OpenAIProviderSpec | AnthropicProviderSpec | MockProviderSpec, Field(discriminator="type")
+]
 
 
 # -------------------------------------------------------------------- assertions
@@ -295,7 +317,9 @@ class Suite(_Model):
                         raise ValueError(f"case {case.id!r}: judge provider {judge!r} not defined")
         return self
 
-    def provider(self, provider_id: str) -> OpenAIProviderSpec | MockProviderSpec:
+    def provider(
+        self, provider_id: str
+    ) -> OpenAIProviderSpec | AnthropicProviderSpec | MockProviderSpec:
         for p in self.providers:
             if p.id == provider_id:
                 return p
