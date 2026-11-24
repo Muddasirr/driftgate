@@ -117,7 +117,7 @@ cases:
 | `max_cost_usd` | the call cost at most `value` (needs `pricing` on the provider) |
 | `llm_judge` | the judge model scores the output at least `min_score` (default 4) out of 5 against `rubric` |
 
-Run `driftgate run --help` to filter by `--provider`, `--tag` or `--case`, and to set `--no-cache`, `--markdown` and `--out`.
+Run `driftgate run --help` to filter by `--provider`, `--tag` or `--case`, and to set `--concurrency`, `--no-cache`, `--markdown` and `--out`.
 
 ## In CI
 
@@ -203,7 +203,7 @@ flowchart LR
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest --cov=driftgate      # 73 tests, no network or API keys needed
+pytest --cov=driftgate      # 74 tests, no network or API keys needed
 ruff check . && ruff format --check . && mypy
 ```
 

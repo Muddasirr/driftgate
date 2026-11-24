@@ -117,6 +117,11 @@ def main() -> None:
 @click.option(
     "--markdown", "markdown_path", type=click.Path(dir_okay=False), help="Write a Markdown report."
 )
+@click.option(
+    "--concurrency",
+    type=click.IntRange(1, 64),
+    help="Override defaults.concurrency, e.g. to stay under a provider's rate limit.",
+)
 @click.option("--no-cache", is_flag=True, help="Always call the model, ignoring cached responses.")
 @click.option(
     "--cache-path",
@@ -132,11 +137,15 @@ def run(
     out: str,
     baseline: str | None,
     markdown_path: str | None,
+    concurrency: int | None,
     no_cache: bool,
     cache_path: str,
 ) -> None:
     """Run SUITE, compare with --baseline if given, and exit 1 if the gate fails."""
     suite = _load(suite_path)
+    if concurrency is not None:
+        defaults = suite.defaults.model_copy(update={"concurrency": concurrency})
+        suite = suite.model_copy(update={"defaults": defaults})
     cache = None if no_cache else ResponseCache(cache_path)
     try:
         result = asyncio.run(

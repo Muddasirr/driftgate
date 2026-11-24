@@ -13,6 +13,6 @@ All notable changes to this project are documented here. The format follows
 - Conversation history with assistant tool calls and tool results.
 - SQLite response cache.
 - Baseline comparison (regressed / fixed / still failing / new / removed) and gate thresholds for regressions, pass rate, cost and p95 latency.
-- CLI: `run`, `compare`, `validate`, `init`.
+- CLI: `run`, `compare`, `validate`, `init`; `--concurrency` override for rate-limited keys.
 - Markdown report, GitHub job summary and a composite GitHub Action that comments on pull requests.
 - Examples: offline quickstart and a voice-agent case study.
