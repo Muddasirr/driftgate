@@ -32,7 +32,7 @@ This is real driftgate output from the [quickstart suite](examples/quickstart/su
 - **One YAML file per suite:** system prompt, tools, models and cases, validated before anything runs, so a typo costs milliseconds, not a paid run.
 - **Agent-aware assertions:** check which **tool** the model calls and with what **arguments** (exact or regex), replay earlier tool calls and tool results in the conversation, and assert a tool is *not* called.
 - **Baseline diffs, not just scores:** every case is classified as regressed, fixed, still failing, new or removed, and the gate fails on regressions, a pass-rate floor, or cost and p95-latency budgets.
-- **Any OpenAI-compatible model:** OpenAI, Groq, Together, Fireworks, vLLM, Ollama. Run several in one suite to compare them side by side.
+- **Any OpenAI-compatible model** (OpenAI, Groq, Together, Fireworks, vLLM, Ollama) **and Claude** through the official Anthropic SDK. Run several in one suite to compare them side by side.
 - **Cheap and reproducible:** responses are cached in SQLite by request hash, so re-running an unchanged suite is free. Retries with exponential backoff honour `Retry-After`.
 - **LLM-as-judge** for things string checks can't capture, with a rubric and a minimum score.
 - **Flakiness shows up:** `repeat: N` runs a case N times, and it passes only if every run passes.
@@ -56,6 +56,8 @@ driftgate run my-suite.yaml
 
 Exit codes: `0` gate passed, `1` gate failed, `2` invalid suite or setup error.
 
+For Claude models, install the extra: `pip install "driftgate[anthropic] @ git+https://github.com/Muddasirr/driftgate"`. It uses the official Anthropic SDK, which reads `ANTHROPIC_API_KEY` (or your `ant auth login` profile) and handles retries, including `529 overloaded`.
+
 ## Writing a suite
 
 ```yaml
@@ -74,6 +76,11 @@ providers:
     base_url: https://api.groq.com/openai/v1
     model: llama-3.3-70b-versatile
     api_key_env: GROQ_API_KEY
+  - id: claude-opus-5-5
+    type: anthropic               # needs: pip install "driftgate[anthropic]"
+    model: claude-opus-5-5
+    max_tokens: 8000              # thinking counts toward it; overrides defaults.max_tokens
+    effort: low                   # low | medium | high | xhigh | max
 
 judge: gpt-4o-mini                # default provider for llm_judge
 
@@ -138,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Muddasirr/driftgate@v0.1.0
+      - uses: Muddasirr/driftgate@v0.2.0
         with:
           suite: evals/suite.yaml
         env:
@@ -184,6 +191,8 @@ flowchart LR
 - **Cached responses skip latency checks** instead of reporting 0 ms, so a cache hit can never make a slow model look fast.
 - **The judge never sees the system prompt.** It grades the behaviour against the rubric, not whether the output matches the instructions it was given.
 - **Errors are results.** A provider failure becomes a failed attempt with the error recorded, so one rate-limited call doesn't abort a 200-case run.
+- **Refusals fail; they don't fall back.** Claude's API can retry a refused request on another model. driftgate doesn't enable that, because the run would then measure a different model than the one named in the suite. A refusal is recorded as a failed attempt with its category.
+- **Cases are written once.** Suites use one message format; each provider translates it (system prompt, tool calls and tool results map to Anthropic's content blocks), so the same case runs against every model.
 
 ### Compared with other tools
 
@@ -191,7 +200,7 @@ flowchart LR
 
 ## Roadmap
 
-- Native Anthropic and Gemini providers (today they work through OpenAI-compatible gateways)
+- Native Gemini provider (today it works through OpenAI-compatible gateways)
 - Variables and templating across cases
 - HTML report with side-by-side outputs for regressions
 - Statistical gating for non-zero temperature (confidence intervals over repeats)
@@ -201,7 +210,7 @@ flowchart LR
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest --cov=driftgate      # 74 tests, no network or API keys needed
+pytest --cov=driftgate      # 83 tests, no network or API keys needed
 ruff check . && ruff format --check . && mypy
 ```
 
