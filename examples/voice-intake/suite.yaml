@@ -5,6 +5,7 @@
 #
 #   export GROQ_API_KEY=...            # judge + default model
 #   export OPENAI_API_KEY=...          # optional second model
+#   export ANTHROPIC_API_KEY=...       # optional third model
 #   driftgate run examples/voice-intake/suite.yaml --provider llama-3.3-70b
 name: voice-intake
 description: Tool-calling and conversation rules for a patient-intake phone agent.
@@ -24,6 +25,15 @@ providers:
     model: gpt-4o-mini
     api_key_env: OPENAI_API_KEY
     pricing: {input_per_mtok: 0.15, output_per_mtok: 0.60}
+  - id: claude-opus-5-5
+    type: anthropic                  # pip install "driftgate[anthropic]"
+    model: claude-opus-5-5
+    # Claude thinks before answering and thinking counts toward max_tokens, so it
+    # gets more room than the suite default. Low effort suits a latency-sensitive
+    # phone conversation; raise it to compare.
+    max_tokens: 8000
+    effort: low
+    pricing: {input_per_mtok: 4.00, output_per_mtok: 20.00}
 
 judge: llama-3.3-70b
 

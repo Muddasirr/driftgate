@@ -76,5 +76,5 @@ def run_result(*results: CaseResult, sha: str = "abc1234") -> RunResult:
 
 @pytest.fixture(autouse=True)
 def _no_real_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ("OPENAI_API_KEY", "GROQ_API_KEY", "GITHUB_STEP_SUMMARY"):
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "GITHUB_STEP_SUMMARY"):
         monkeypatch.delenv(var, raising=False)
