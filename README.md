@@ -162,8 +162,6 @@ export GROQ_API_KEY=...
 driftgate run examples/voice-intake/suite.yaml --provider llama-3.3-70b
 ```
 
-> **TODO(Muddasir):** run the case study against llama-3.3-70b and gpt-4o-mini and paste the results table here, with one finding (which rule each model breaks, and what prompt change fixed it).
-
 ## How it works
 
 ```mermaid
